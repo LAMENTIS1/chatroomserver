@@ -1,20 +1,20 @@
 from flask import Flask, render_template, request, redirect, url_for, session
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_cors import CORS  # Add this import
 from engineio.payload import Payload
 
-# Configure payload size
 Payload.max_decode_packets = 200
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "thisismys3cr3tk3y"
 
-# Initialize SocketIO
-socketio = SocketIO(app, cors_allowed_origins="*")
+CORS(app)  # Add this line to handle CORS
 
-# Global state
-_users_in_room = {}  # Stores room-wise user list
-_room_of_sid = {}    # Stores room joined by a user
-_name_of_sid = {}    # Stores display names of users
+socketio = SocketIO(app)
+
+_users_in_room = {}
+_room_of_sid = {}
+_name_of_sid = {}
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -27,13 +27,7 @@ def index():
 def enter_room(room_id):
     if room_id not in session:
         return redirect(url_for("entry_checkpoint", room_id=room_id))
-    return render_template(
-        "chatroom.html",
-        room_id=room_id,
-        display_name=session[room_id]["name"],
-        mute_audio=session[room_id]["mute_audio"],
-        mute_video=session[room_id]["mute_video"]
-    )
+    return render_template("chatroom.html", room_id=room_id, display_name=session[room_id]["name"], mute_audio=session[room_id]["mute_audio"], mute_video=session[room_id]["mute_video"])
 
 @app.route("/room/<string:room_id>/checkpoint/", methods=["GET", "POST"])
 def entry_checkpoint(room_id):
@@ -48,7 +42,7 @@ def entry_checkpoint(room_id):
 @socketio.on("connect")
 def on_connect():
     sid = request.sid
-    print("New socket connected ", sid)
+    print(f"New socket connected {sid}")
 
 @socketio.on("join-room")
 def on_join_room(data):
@@ -56,23 +50,20 @@ def on_join_room(data):
     room_id = data["room_id"]
     display_name = session[room_id]["name"]
     
-    # Register sid to the room
     join_room(room_id)
     _room_of_sid[sid] = room_id
     _name_of_sid[sid] = display_name
     
-    # Broadcast to others in the room
     print(f"[{room_id}] New member joined: {display_name}<{sid}>")
     emit("user-connect", {"sid": sid, "name": display_name}, broadcast=True, include_self=False, room=room_id)
     
-    # Add to user list maintained on the server
     if room_id not in _users_in_room:
         _users_in_room[room_id] = [sid]
-        emit("user-list", {"my_id": sid})  # Send own id only
+        emit("user-list", {"my_id": sid})
     else:
         usrlist = {u_id: _name_of_sid[u_id] for u_id in _users_in_room[room_id]}
-        emit("user-list", {"list": usrlist, "my_id": sid})  # Send list of existing users to the new member
-        _users_in_room[room_id].append(sid)  # Add new member to user list maintained on the server
+        emit("user-list", {"list": usrlist, "my_id": sid})
+        _users_in_room[room_id].append(sid)
 
     print("\nusers: ", _users_in_room, "\n")
 
@@ -99,7 +90,7 @@ def on_data(data):
     sender_sid = data['sender_id']
     target_sid = data['target_id']
     if sender_sid != request.sid:
-        print("[Not supposed to happen!] request.sid and sender_id don't match!!!")
+        print(f'[Not supposed to happen!] request.sid and sender_id don\'t match!!!')
 
     if data["type"] != "new-ice-candidate":
         print(f'{data["type"]} message from {sender_sid} to {target_sid}')
